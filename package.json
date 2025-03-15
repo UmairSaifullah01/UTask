@@ -2,7 +2,7 @@
 	"name": "com.thebaddest.utask",
 	"version": "1.0.0",
 	"displayName": "UTask",
-	"description": "A short description of your package.",
+	"description": "UTask is a lightweight and efficient task scheduling system for Unity, providing a modern async/await pattern implementation specifically designed for Unity game development.",
 	"unity": "2020.3",
 	"author": {
 		"name": "Umair Saifullah",

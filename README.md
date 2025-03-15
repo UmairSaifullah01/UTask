@@ -2,6 +2,20 @@
 
 UTask is a lightweight and efficient task scheduling system for Unity, providing a modern async/await pattern implementation specifically designed for Unity game development.
 
+## Description
+
+UTask is a powerful and flexible task management solution that brings the convenience of C#'s async/await pattern to Unity development. It offers a more intuitive alternative to coroutines with better error handling, cancellation support, and dependency management. This package is designed to help Unity developers write cleaner, more maintainable asynchronous code while maintaining high performance.
+
+### Key Benefits:
+
+- 🚀 **High Performance**: Optimized for Unity's update cycle
+- 🎯 **Type Safety**: Full generic support and compile-time type checking
+- 🔄 **Easy Coroutine Migration**: Seamless conversion from Unity's coroutines
+- 🛡️ **Robust Error Handling**: Better exception propagation and handling
+- 🎮 **Unity-Specific**: Built with Unity's architecture in mind
+- 🧩 **Modular Design**: Easy to integrate into existing projects
+- 📦 **Lightweight**: Minimal overhead and memory footprint
+
 ## Features
 
 - Lightweight task scheduling system
