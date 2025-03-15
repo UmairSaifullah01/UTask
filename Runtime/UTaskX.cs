@@ -40,8 +40,8 @@ namespace THEBADDEST.Tasks
 				return immediateSource.Task;
 			}
 
-			var    source          = new UTaskCompletionSource();
-			var    targetTime      = Time.time + seconds;
+			var source = new UTaskCompletionSource();
+			var targetTime = Time.time + seconds;
 			Action checkTimeAction = null;
 			checkTimeAction = () =>
 			{
@@ -58,7 +58,7 @@ namespace THEBADDEST.Tasks
 		public static async UTask WhenAll(params UTask[] tasks)
 		{
 			var remaining = tasks.Length;
-			var tcs       = new UTaskCompletionSource();
+			var tcs = new UTaskCompletionSource();
 			foreach (var task in tasks)
 			{
 				RunTask(task);
@@ -100,7 +100,7 @@ namespace THEBADDEST.Tasks
 
 		public static UTask WaitUntil(Func<bool> predicate)
 		{
-			var    source         = new UTaskCompletionSource();
+			var source = new UTaskCompletionSource();
 			Action checkCondition = null;
 			checkCondition = () =>
 			{
@@ -121,8 +121,8 @@ namespace THEBADDEST.Tasks
 
 		public static UTask WaitForFixedUpdate()
 		{
-			var    source           = new UTaskCompletionSource();
-			bool   isFirstFrame     = true;
+			var source = new UTaskCompletionSource();
+			bool isFirstFrame = true;
 			Action checkFixedUpdate = null;
 			checkFixedUpdate = () =>
 			{
@@ -153,7 +153,7 @@ namespace THEBADDEST.Tasks
 						return;
 					}
 
-					var            current        = enumerator.Current;
+					var current = enumerator.Current;
 					Action<Action> scheduleAction = next => UTaskScheduler.Schedule(next);
 					if (current is WaitForSeconds waitForSeconds)
 					{
@@ -255,6 +255,97 @@ namespace THEBADDEST.Tasks
 		public static UTask ToUTask(this CustomYieldInstruction yieldInstruction)
 		{
 			return WaitWhile(() => yieldInstruction.keepWaiting);
+		}
+
+		/// <summary>
+		/// Makes the task dependent on an UnityEngine.Object, canceling if the object is destroyed
+		/// </summary>
+		public static UTask ToDepend(this UTask task, UnityEngine.Object dependency)
+		{
+			if (dependency == null)
+				throw new ArgumentNullException(nameof(dependency), "Dependency object cannot be null");
+
+			var tcs = new UTaskCompletionSource();
+
+			UTaskScheduler.Schedule(async () =>
+			{
+				try
+				{
+					while (!task.IsCompleted && dependency != null)
+					{
+						await NextFrame();
+					}
+
+					if (dependency == null)
+					{
+						tcs.TrySetCanceled();
+						return;
+					}
+
+					if ((task.Status == UTaskStatus.Faulted))
+						tcs.TrySetException( new Exception("Task faulted with no exception"));
+					else if (task.Status == UTaskStatus.Canceled)
+						tcs.TrySetCanceled();
+					else
+						tcs.TrySetResult();
+				}
+				catch (Exception ex)
+				{
+					tcs.TrySetException(ex);
+				}
+			});
+
+			return tcs.Task;
+		}
+
+		/// <summary>
+		/// Makes the task dependent on an UnityEngine.Object, canceling if the object is destroyed
+		/// </summary>
+		public static UTask<T> ToDepend<T>(this UTask<T> task, UnityEngine.Object dependency)
+		{
+			if (dependency == null)
+				throw new ArgumentNullException(nameof(dependency), "Dependency object cannot be null");
+
+			var tcs = new UTaskCompletionSource<T>();
+
+			UTaskScheduler.Schedule(async () =>
+			{
+				try
+				{
+					while (!task.IsCompleted && dependency != null)
+					{
+						await NextFrame();
+					}
+
+					if (dependency == null)
+					{
+						tcs.TrySetCanceled();
+						return;
+					}
+
+					if (task.Status==UTaskStatus.Faulted)
+						tcs.TrySetException( new Exception("Task faulted with no exception"));
+					else if (task.Status == UTaskStatus.Canceled)
+						tcs.TrySetCanceled();
+					else
+					{
+						try
+						{
+							tcs.TrySetResult(await task);
+						}
+						catch (Exception ex)
+						{
+							tcs.TrySetException(ex);
+						}
+					}
+				}
+				catch (Exception ex)
+				{
+					tcs.TrySetException(ex);
+				}
+			});
+
+			return tcs.Task;
 		}
 
 	}
