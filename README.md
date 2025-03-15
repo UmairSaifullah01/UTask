@@ -200,10 +200,10 @@ public class Example : MonoBehaviour
 - `UTaskCompletionSource` - Task completion control
 - `UTaskParamertrized` - Generic task implementation
 
-## Version
+## 🚀 About Me
 
-Current Version: 1.0
+Umair Saifullah ~ a unity developer from Pakistan.
 
 ## License
 
-[Your License Type] - See LICENSE file for details
+[MIT](https://choosealicense.com/licenses/mit/)

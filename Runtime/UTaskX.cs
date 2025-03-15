@@ -33,6 +33,9 @@ namespace THEBADDEST.Tasks
 
 		public static UTask Delay(float seconds)
 		{
+			if (float.IsNaN(seconds))
+				throw new ArgumentException("Delay duration cannot be NaN", nameof(seconds));
+
 			if (seconds <= 0)
 			{
 				var immediateSource = new UTaskCompletionSource();
@@ -41,26 +44,69 @@ namespace THEBADDEST.Tasks
 			}
 
 			var source = new UTaskCompletionSource();
-			var targetTime = Time.time + seconds;
-			Action checkTimeAction = null;
-			checkTimeAction = () =>
+			var targetTime = Time.time + Mathf.Max(0, seconds);
+			void CheckTimeAction()
 			{
 				if (Time.time >= targetTime)
 				{
 					source.TrySetResult();
-					UTaskScheduler.RemovePerFrame(checkTimeAction);
+					UTaskScheduler.RemovePerFrame(CheckTimeAction);
 				}
-			};
-			UTaskScheduler.SchedulePerFrame(checkTimeAction);
+			}
+
+			UTaskScheduler.SchedulePerFrame(CheckTimeAction);
+			return source.Task;
+		}
+
+		public static UTask DelayRealtime(float seconds)
+		{
+			if (float.IsNaN(seconds))
+				throw new ArgumentException("Delay duration cannot be NaN", nameof(seconds));
+
+			if (seconds <= 0)
+			{
+				var immediateSource = new UTaskCompletionSource();
+				immediateSource.TrySetResult();
+				return immediateSource.Task;
+			}
+
+			var source = new UTaskCompletionSource();
+			var targetTime = Time.realtimeSinceStartup + Mathf.Max(0, seconds);
+			void CheckTimeAction()
+			{
+				if (Time.realtimeSinceStartup >= targetTime)
+				{
+					source.TrySetResult();
+					UTaskScheduler.RemovePerFrame(CheckTimeAction);
+				}
+			}
+			UTaskScheduler.SchedulePerFrame(CheckTimeAction);
 			return source.Task;
 		}
 
 		public static async UTask WhenAll(params UTask[] tasks)
 		{
-			var remaining = tasks.Length;
-			var tcs = new UTaskCompletionSource();
+			if (tasks == null || tasks.Length == 0)
+				return;
+
+			// Count valid tasks
+			int validTaskCount = 0;
 			foreach (var task in tasks)
 			{
+				if (task.IsValid) validTaskCount++;
+			}
+
+			if (validTaskCount == 0)
+				return;
+
+			var remaining = validTaskCount;
+			var tcs = new UTaskCompletionSource();
+			var exceptions = new List<Exception>();
+			var anyCanceled = false;
+
+			foreach (var task in tasks)
+			{
+				if (!task.IsValid) continue;  // Skip invalid tasks
 				RunTask(task);
 			}
 
@@ -69,15 +115,29 @@ namespace THEBADDEST.Tasks
 				try
 				{
 					await task;
-					if (--remaining == 0)
-					{
-						tcs.TrySetResult();
-					}
+				}
+				catch (OperationCanceledException)
+				{
+					anyCanceled = true;
 				}
 				catch (Exception ex)
 				{
-					Debug.LogError($"Task failed: {ex}");
-					tcs.TrySetException(ex);
+					lock (exceptions)
+					{
+						exceptions.Add(ex);
+					}
+				}
+				finally
+				{
+					if (--remaining == 0)
+					{
+						if (exceptions.Count > 0)
+							tcs.TrySetException(exceptions.Count == 1 ? exceptions[0] : new AggregateException(exceptions));
+						else if (anyCanceled)
+							tcs.TrySetCanceled();
+						else
+							tcs.TrySetResult();
+					}
 				}
 			}
 
@@ -141,6 +201,9 @@ namespace THEBADDEST.Tasks
 
 		public static UTask ToUTask(this IEnumerator enumerator)
 		{
+			if (enumerator == null)
+				throw new ArgumentNullException(nameof(enumerator));
+
 			var source = new UTaskCompletionSource();
 
 			void HandleCoroutine()
@@ -154,8 +217,25 @@ namespace THEBADDEST.Tasks
 					}
 
 					var current = enumerator.Current;
+
+					// Handle null yield return
+					if (current == null)
+					{
+						UTaskScheduler.Schedule(HandleCoroutine);
+						return;
+					}
+
 					Action<Action> scheduleAction = next => UTaskScheduler.Schedule(next);
-					if (current is WaitForSeconds waitForSeconds)
+
+					if (current is IEnumerator nestedCoroutine)
+					{
+						scheduleAction = next => UTaskScheduler.Schedule(async () =>
+						{
+							await nestedCoroutine.ToUTask();
+							next();
+						});
+					}
+					else if (current is WaitForSeconds waitForSeconds)
 					{
 						float seconds = waitForSeconds.GetFieldValue<float>("m_Seconds", 0f);
 						scheduleAction = next => UTaskScheduler.Schedule(async () =>
@@ -169,7 +249,7 @@ namespace THEBADDEST.Tasks
 						float seconds = waitRealtime.waitTime;
 						scheduleAction = next => UTaskScheduler.Schedule(async () =>
 						{
-							await Delay(seconds);
+							await DelayRealtime(seconds);
 							next();
 						});
 					}
@@ -192,20 +272,26 @@ namespace THEBADDEST.Tasks
 					else if (current is WaitUntil waitUntil)
 					{
 						var predicate = waitUntil.GetFieldValue<Func<bool>>("m_Predicate", null);
-						scheduleAction = next => UTaskScheduler.Schedule(async () =>
+						if (predicate != null)
 						{
-							await WaitUntil(predicate);
-							next();
-						});
+							scheduleAction = next => UTaskScheduler.Schedule(async () =>
+							{
+								await WaitUntil(predicate);
+								next();
+							});
+						}
 					}
 					else if (current is WaitWhile waitWhile)
 					{
 						var predicate = waitWhile.GetFieldValue<Func<bool>>("m_Predicate", null);
-						scheduleAction = next => UTaskScheduler.Schedule(async () =>
+						if (predicate != null)
 						{
-							await WaitWhile(predicate);
-							next();
-						});
+							scheduleAction = next => UTaskScheduler.Schedule(async () =>
+							{
+								await WaitWhile(predicate);
+								next();
+							});
+						}
 					}
 					else if (current is AsyncOperation asyncOp)
 					{
@@ -271,23 +357,17 @@ namespace THEBADDEST.Tasks
 			{
 				try
 				{
-					while (!task.IsCompleted && dependency != null)
-					{
-						await NextFrame();
-					}
-
+					await task;
 					if (dependency == null)
 					{
 						tcs.TrySetCanceled();
 						return;
 					}
-
-					if ((task.Status == UTaskStatus.Faulted))
-						tcs.TrySetException( new Exception("Task faulted with no exception"));
-					else if (task.Status == UTaskStatus.Canceled)
-						tcs.TrySetCanceled();
-					else
-						tcs.TrySetResult();
+					tcs.TrySetResult();
+				}
+				catch (OperationCanceledException)
+				{
+					tcs.TrySetCanceled();
 				}
 				catch (Exception ex)
 				{
@@ -312,32 +392,17 @@ namespace THEBADDEST.Tasks
 			{
 				try
 				{
-					while (!task.IsCompleted && dependency != null)
-					{
-						await NextFrame();
-					}
-
+					var result = await task;
 					if (dependency == null)
 					{
 						tcs.TrySetCanceled();
 						return;
 					}
-
-					if (task.Status==UTaskStatus.Faulted)
-						tcs.TrySetException( new Exception("Task faulted with no exception"));
-					else if (task.Status == UTaskStatus.Canceled)
-						tcs.TrySetCanceled();
-					else
-					{
-						try
-						{
-							tcs.TrySetResult(await task);
-						}
-						catch (Exception ex)
-						{
-							tcs.TrySetException(ex);
-						}
-					}
+					tcs.TrySetResult(result);
+				}
+				catch (OperationCanceledException)
+				{
+					tcs.TrySetCanceled();
 				}
 				catch (Exception ex)
 				{
@@ -346,6 +411,130 @@ namespace THEBADDEST.Tasks
 			});
 
 			return tcs.Task;
+		}
+
+		/// <summary>
+		/// Creates a task that completes after a timeout or when the original task completes
+		/// </summary>
+		public static async UTask<bool> WithTimeout(this UTask task, float timeoutSeconds)
+		{
+			if (!task.IsValid)
+				throw new ArgumentException("Task is not valid", nameof(task));
+
+			var timeoutTask = Delay(timeoutSeconds);
+			var completedTask = await WhenAny(task, timeoutTask);
+
+			if (completedTask == timeoutTask)
+				return false;
+
+			await task; // Propagate any exceptions from the original task
+			return true;
+		}
+
+		/// <summary>
+		/// Creates a task that completes when any of the tasks complete
+		/// </summary>
+		public static async UTask<UTask> WhenAny(params UTask[] tasks)
+		{
+			if (tasks == null || tasks.Length == 0)
+				throw new ArgumentException("At least one task is required", nameof(tasks));
+
+			var tcs = new UTaskCompletionSource<UTask>();
+
+			foreach (var task in tasks)
+			{
+				if (!task.IsValid) continue;
+
+				RunTask(task);
+			}
+
+			async void RunTask(UTask task)
+			{
+				try
+				{
+					await task;
+					tcs.TrySetResult(task);
+				}
+				catch (Exception)
+				{
+					// Ignore exceptions, they will be thrown when awaiting the task
+				}
+			}
+
+			return await tcs.Task;
+		}
+
+		/// <summary>
+		/// Retries a task if it fails
+		/// </summary>
+		public static async UTask WithRetry(this Func<UTask> taskFactory, int maxAttempts = 3, float delayBetweenAttempts = 1f)
+		{
+			if (taskFactory == null)
+				throw new ArgumentNullException(nameof(taskFactory));
+
+			Exception lastException = null;
+
+			for (int attempt = 0; attempt < maxAttempts; attempt++)
+			{
+				try
+				{
+					if (attempt > 0)
+						await Delay(delayBetweenAttempts);
+
+					await taskFactory();
+					return;
+				}
+				catch (Exception ex)
+				{
+					lastException = ex;
+				}
+			}
+
+			throw new AggregateException($"Task failed after {maxAttempts} attempts", lastException);
+		}
+
+		/// <summary>
+		/// Runs a task with a timeout and optional retry
+		/// </summary>
+		public static async UTask WithTimeoutAndRetry(this Func<UTask> taskFactory, float timeoutSeconds, int maxAttempts = 3, float delayBetweenAttempts = 1f)
+		{
+			await WithRetry(async () =>
+			{
+				var task = taskFactory();
+				if (!await task.WithTimeout(timeoutSeconds))
+					throw new TimeoutException($"Task timed out after {timeoutSeconds} seconds");
+			}, maxAttempts, delayBetweenAttempts);
+		}
+
+		/// <summary>
+		/// Runs multiple tasks in sequence
+		/// </summary>
+		public static async UTask InSequence(params Func<UTask>[] taskFactories)
+		{
+			if (taskFactories == null || taskFactories.Length == 0)
+				return;
+
+			foreach (var factory in taskFactories)
+			{
+				if (factory == null) continue;
+				await factory();
+			}
+		}
+
+		/// <summary>
+		/// Creates a task that can be manually completed from outside
+		/// </summary>
+		public static UTaskCompletionSource CreateManualTask()
+		{
+			return new UTaskCompletionSource();
+		}
+
+		/// <summary>
+		/// Creates a task that can be manually completed from outside with a result
+		/// </summary>
+		public static UTaskCompletionSource<T> CreateManualTask<T>()
+		{
+			return new UTaskCompletionSource<T>();
 		}
 
 	}
