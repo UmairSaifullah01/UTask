@@ -8,13 +8,37 @@ UTask is a powerful and flexible task management solution that brings the conven
 
 ### Key Benefits:
 
-- 🚀 **High Performance**: Optimized for Unity's update cycle
+- 🚀 **High Performance**: Optimized scheduler with ring buffer implementation
 - 🎯 **Type Safety**: Full generic support and compile-time type checking
 - 🔄 **Easy Coroutine Migration**: Seamless conversion from Unity's coroutines
 - 🛡️ **Robust Error Handling**: Better exception propagation and handling
 - 🎮 **Unity-Specific**: Built with Unity's architecture in mind
 - 🧩 **Modular Design**: Easy to integrate into existing projects
 - 📦 **Lightweight**: Minimal overhead and memory footprint
+- ♻️ **Memory Efficient**: Object pooling for task continuations
+
+## Performance Optimizations
+
+### Task Scheduler
+
+- Ring buffer implementation for efficient action queuing
+- Optimized per-frame action handling
+- Reduced lock contention
+- Automatic cleanup of completed tasks
+
+### Memory Management
+
+- Object pooling for continuation wrappers
+- Efficient delay implementation using min-heap
+- Reduced garbage collection pressure
+- Smart handling of task completions
+
+### Delay System
+
+- Centralized delay management
+- Efficient time tracking
+- Minimal per-frame overhead
+- Optimized scheduling of delayed tasks
 
 ## Features
 
@@ -43,13 +67,13 @@ Add this package to your Unity project through the Package Manager.
 // Basic usage with delay
 async UTask MyAsyncMethod()
 {
-    await UTaskX.Delay(1000); // Wait for 1 second
+    await UTask.Delay(1000); // Wait for 1 second
 }
 
 // With return value
 async UTask<int> MyAsyncMethodWithResult()
 {
-    await UTaskX.Delay(1000);
+    await UTask.Delay(1000);
     return 42;
 }
 ```
@@ -58,14 +82,14 @@ async UTask<int> MyAsyncMethodWithResult()
 
 ```csharp
 // Different ways to handle time
-await UTaskX.Wait(1f);                  // Basic wait
-await 2f.Seconds();                     // Extension method on float
-await 500f.Ms();                        // Wait milliseconds
-await 0.5f.Minutes();                   // Wait minutes
+await UTask.Wait(1f);                  // Basic wait
+await 2f.Seconds();                    // Extension method on float
+await 500f.Ms();                       // Wait milliseconds
+await 0.5f.Minutes();                  // Wait minutes
 
 // Frame control
-await UTaskX.NextFrame();               // Wait for next frame
-await UTaskX.Fixed();                   // Wait for next fixed update
+await UTask.Next();                    // Wait for next frame
+await UTask.Fixed();                   // Wait for next fixed update
 ```
 
 ### Parallel Task Execution
@@ -76,12 +100,12 @@ UTask task1 = SlowOperation("Task 1", 1f);
 UTask task2 = SlowOperation("Task 2", 2f);
 UTask task3 = SlowOperation("Task 3", 3f);
 
-await UTaskX.All(task1, task2, task3);  // Wait for all tasks to complete
+await UTask.All(task1, task2, task3);  // Wait for all tasks to complete
 
 async UTask SlowOperation(string name, float delay)
 {
     Debug.Log($"{name} starting...");
-    await UTaskX.Delay(delay);
+    await UTask.Delay(delay);
     Debug.Log($"{name} completed after {delay} seconds");
 }
 ```
@@ -119,10 +143,10 @@ await SceneManager.UnloadSceneAsync("MyScene").ToUTask();
 
 ```csharp
 // Wait until condition is met
-await UTaskX.Until(() => condition);
+await UTask.Until(() => condition);
 
 // Wait while condition is true
-await UTaskX.While(() => condition);
+await UTask.While(() => condition);
 ```
 
 ### Error Handling
@@ -136,25 +160,6 @@ catch (Exception e)
 {
     Debug.LogError($"Operation failed: {e.Message}");
 }
-```
-
-### Custom Yield Instructions
-
-```csharp
-public class CustomTimedYield : CustomYieldInstruction
-{
-    private float endTime;
-
-    public CustomTimedYield(float duration)
-    {
-        endTime = Time.time + duration;
-    }
-
-    public override bool keepWaiting => Time.time < endTime;
-}
-
-// Use it with UTask
-await new CustomTimedYield(3f).ToUTask();
 ```
 
 ### Object Dependencies
@@ -171,36 +176,23 @@ public class Example : MonoBehaviour
         await LongRunningTask()
             .ToDepend(dependency);
 
-        // Works with any UnityEngine.Object (MonoBehaviour, ScriptableObject, etc.)
+        // Works with any UnityEngine.Object
         await LongRunningTask()
-            .ToDepend(this);  // Depend on this MonoBehaviour
+            .ToDepend(this);
 
         // Works with generic tasks too
         int result = await CalculateWithDelay()
             .ToDepend(dependency);
-
-        // Example of handling cancellation
-        try
-        {
-            GameObject temp = new GameObject();
-            var task = LongRunningTask().ToDepend(temp);
-            Destroy(temp);  // Destroying dependency
-            await task;     // This will throw OperationCanceledException
-        }
-        catch (OperationCanceledException)
-        {
-            Debug.Log("Task was canceled because dependency was destroyed!");
-        }
     }
 
     private async UTask LongRunningTask()
     {
-        await UTaskX.Wait(2f);
+        await UTask.Wait(2f);
     }
 
     private async UTask<int> CalculateWithDelay()
     {
-        await UTaskX.Wait(1f);
+        await UTask.Wait(1f);
         return 42;
     }
 }
@@ -208,11 +200,20 @@ public class Example : MonoBehaviour
 
 ## Components
 
-- `UTask` - Base task implementation
-- `UTaskX` - Extended task functionality with utility methods
-- `UTaskScheduler` - Custom Unity-optimized scheduler
-- `UTaskCompletionSource` - Task completion control
+- `UTask` - Base task implementation with static utility methods
+- `UTaskUtility` - Extension methods and utility functions
+- `UTaskScheduler` - High-performance Unity-optimized scheduler
+- `UTaskCompletionSource` - Memory-efficient task completion control
 - `UTaskParamertrized` - Generic task implementation
+
+## Best Practices
+
+1. Use static methods from `UTask` for core functionality (e.g., `UTask.Delay`, `UTask.Next`)
+2. Use extension methods from `UTaskUtility` for convenience (e.g., `2f.Seconds()`)
+3. Leverage object pooling for better memory management
+4. Use task dependencies to prevent memory leaks
+5. Handle exceptions appropriately in async methods
+6. Avoid creating unnecessary task continuations
 
 ## 🚀 About Me
 

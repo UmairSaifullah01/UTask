@@ -10,15 +10,20 @@ namespace THEBADDEST.Tasks
     /// </summary>
     public class UTaskScheduler : MonoBehaviour
     {
-        private static readonly Queue<Action> mainThreadActions = new Queue<Action>();
-        private static readonly HashSet<Action> perFrameActions = new HashSet<Action>();
+        private const int RING_BUFFER_SIZE = 1024;
+        private static readonly Action[] actionRingBuffer = new Action[RING_BUFFER_SIZE];
+        private static int head = 0;
+        private static int tail = 0;
         private static readonly object lockObject = new object();
+        private static readonly HashSet<Action> perFrameActions = new HashSet<Action>();
+        private static readonly HashSet<Action> perFixedFrameActions = new HashSet<Action>();
         private static bool isProcessing;
-        private static int maxActionsPerFrame = 100; // Prevent too many actions in one frame
         private static bool isInitialized;
         private static bool isQuitting;
+        private static int maxActionsPerFrame = 100; // Prevent too many actions in one frame
         private static int totalProcessedActions;
         private static int totalProcessedPerFrameActions;
+        private static int totalProcessedPerFixedFrameActions;
         private static readonly List<Action> tempActionsList = new List<Action>();
 
         /// <summary>
@@ -49,6 +54,7 @@ namespace THEBADDEST.Tasks
             isInitialized = false;
             isQuitting = true;
             ClearPerFrameActions();
+            ClearPerFixedFrameActions();
         }
 
         private void OnDisable()
@@ -56,6 +62,7 @@ namespace THEBADDEST.Tasks
             if (isInitialized)
             {
                 ClearPerFrameActions();
+                ClearPerFixedFrameActions();
             }
         }
 
@@ -80,7 +87,15 @@ namespace THEBADDEST.Tasks
 
             lock (lockObject)
             {
-                mainThreadActions.Enqueue(action);
+                int nextTail = (tail + 1) % RING_BUFFER_SIZE;
+                if (nextTail == head)
+                {
+                    Debug.LogError("Action queue is full!");
+                    return;
+                }
+
+                actionRingBuffer[tail] = action;
+                tail = nextTail;
             }
         }
 
@@ -137,6 +152,59 @@ namespace THEBADDEST.Tasks
             }
         }
 
+        /// <summary>
+        /// Schedules an action to be executed every fixed update.
+        /// </summary>
+        /// <param name="action">The action to execute every fixed update.</param>
+        /// <exception cref="ArgumentNullException">Thrown when action is null.</exception>
+        public static void SchedulePerFixedFrame(Action action)
+        {
+            if (action == null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            if (isQuitting) return;
+
+            if (!isInitialized)
+            {
+                Initialize();
+            }
+
+            lock (lockObject)
+            {
+                perFixedFrameActions.Add(action);
+            }
+        }
+
+        /// <summary>
+        /// Removes a per-fixed-frame action from the scheduler.
+        /// </summary>
+        /// <param name="action">The action to remove.</param>
+        /// <returns>True if the action was removed, false otherwise.</returns>
+        public static bool RemovePerFixedFrame(Action action)
+        {
+            if (action == null || isQuitting) return false;
+
+            lock (lockObject)
+            {
+                return perFixedFrameActions.Remove(action);
+            }
+        }
+
+        /// <summary>
+        /// Clears all per-fixed-frame actions from the scheduler.
+        /// </summary>
+        public static void ClearPerFixedFrameActions()
+        {
+            if (isQuitting) return;
+
+            lock (lockObject)
+            {
+                perFixedFrameActions.Clear();
+            }
+        }
+
         private void Update()
         {
             if (!isInitialized || isProcessing || isQuitting) return;
@@ -159,31 +227,32 @@ namespace THEBADDEST.Tasks
 
         private void ProcessMainThreadActions()
         {
-            int processedActions = 0;
-            while (processedActions < maxActionsPerFrame)
-            {
-                Action action;
-                lock (lockObject)
-                {
-                    if (mainThreadActions.Count == 0) break;
-                    action = mainThreadActions.Dequeue();
-                }
+            int processedCount = 0;
+            int currentTail;
 
-                try
-                {
-                    action();
-                    processedActions++;
-                    totalProcessedActions++;
-                }
-                catch (Exception e)
-                {
-                    Debug.LogException(e);
-                }
+            lock (lockObject)
+            {
+                currentTail = tail;
             }
 
-            if (processedActions >= maxActionsPerFrame)
+            while (head != currentTail && processedCount < RING_BUFFER_SIZE)
             {
-                Debug.LogWarning($"Reached maximum actions per frame ({maxActionsPerFrame})");
+                var action = actionRingBuffer[head];
+                if (action != null)
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogException(e);
+                    }
+                    actionRingBuffer[head] = null; // Help GC
+                }
+
+                head = (head + 1) % RING_BUFFER_SIZE;
+                processedCount++;
             }
         }
 
@@ -236,6 +305,79 @@ namespace THEBADDEST.Tasks
                     foreach (var action in actionsToRemove)
                     {
                         perFrameActions.Remove(action);
+                    }
+                }
+            }
+        }
+
+        private void FixedUpdate()
+        {
+            if (!isInitialized || isProcessing || isQuitting) return;
+            isProcessing = true;
+
+            try
+            {
+                ProcessPerFixedFrameActions();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error in UTaskScheduler FixedUpdate: {e}");
+            }
+            finally
+            {
+                isProcessing = false;
+            }
+        }
+
+        private void ProcessPerFixedFrameActions()
+        {
+            // Clear and fill temporary list with current fixed update actions
+            lock (lockObject)
+            {
+                tempActionsList.Clear();
+                foreach (var action in perFixedFrameActions)
+                {
+                    tempActionsList.Add(action);
+                }
+            }
+
+            // Process actions from the temporary list
+            var actionsToRemove = new List<Action>();
+            foreach (var action in tempActionsList)
+            {
+                try
+                {
+                    if (action == null)
+                    {
+                        actionsToRemove.Add(action);
+                        continue;
+                    }
+
+                    // Check if the method's target is a destroyed object
+                    if (action.Target is UnityEngine.Object target && target == null)
+                    {
+                        actionsToRemove.Add(action);
+                        continue;
+                    }
+
+                    action();
+                    totalProcessedPerFixedFrameActions++;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                    actionsToRemove.Add(action);
+                }
+            }
+
+            // Remove invalid actions
+            if (actionsToRemove.Count > 0)
+            {
+                lock (lockObject)
+                {
+                    foreach (var action in actionsToRemove)
+                    {
+                        perFixedFrameActions.Remove(action);
                     }
                 }
             }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using UnityEngine;
@@ -7,6 +8,7 @@ namespace THEBADDEST.Tasks
 {
     public class UTaskCompletionSource : IUTaskSource
     {
+        private static readonly Action<object> ExecuteContinuationDelegate = ExecuteContinuation;
         private Action<object> continuation;
         private object continuationState;
         private UTaskStatus status;
@@ -39,13 +41,19 @@ namespace THEBADDEST.Tasks
 
             if (status.IsCompleted())
             {
-                continuation(state);
+                UTaskScheduler.Schedule(() => continuation(state));
             }
             else
             {
                 this.continuation = continuation;
                 this.continuationState = state;
             }
+        }
+
+        public bool TrySetCanceled(short token)
+        {
+            if (token != version) throw new InvalidOperationException("Invalid task token");
+            return TrySetCanceled();
         }
 
         public bool TrySetResult()
@@ -85,14 +93,43 @@ namespace THEBADDEST.Tasks
             continuation = null;
             continuationState = null;
 
-            // Execute continuation immediately if we're on the main thread
-            if (Application.isPlaying && Thread.CurrentThread.ManagedThreadId == 1)
+            var wrapper = ContinuationWrapper.Get(cont, state);
+            UTaskScheduler.Schedule(() => ExecuteContinuationDelegate(wrapper));
+        }
+
+        private static void ExecuteContinuation(object state)
+        {
+            var wrapper = (ContinuationWrapper)state;
+            try
             {
-                cont(state);
+                wrapper.Continuation(wrapper.State);
             }
-            else
+            finally
             {
-                UTaskScheduler.Schedule(() => cont(state));
+                wrapper.Return();
+            }
+        }
+
+        private class ContinuationWrapper
+        {
+            private static readonly ObjectPool<ContinuationWrapper> Pool = new ObjectPool<ContinuationWrapper>(() => new ContinuationWrapper());
+
+            public Action<object> Continuation;
+            public object State;
+
+            public static ContinuationWrapper Get(Action<object> continuation, object state)
+            {
+                var wrapper = Pool.Get();
+                wrapper.Continuation = continuation;
+                wrapper.State = state;
+                return wrapper;
+            }
+
+            public void Return()
+            {
+                Continuation = null;
+                State = null;
+                Pool.Return(this);
             }
         }
 
@@ -103,6 +140,39 @@ namespace THEBADDEST.Tasks
             continuation = null;
             continuationState = null;
             version++;
+        }
+    }
+
+    internal class ObjectPool<T> where T : class
+    {
+        private readonly Func<T> createFunc;
+        private readonly Stack<T> pool;
+        private readonly int maxSize;
+
+        public ObjectPool(Func<T> createFunc, int initialSize = 32, int maxSize = 1024)
+        {
+            this.createFunc = createFunc;
+            this.maxSize = maxSize;
+            pool = new Stack<T>(initialSize);
+        }
+
+        public T Get()
+        {
+            lock (pool)
+            {
+                if (pool.Count > 0)
+                    return pool.Pop();
+            }
+            return createFunc();
+        }
+
+        public void Return(T item)
+        {
+            lock (pool)
+            {
+                if (pool.Count < maxSize)
+                    pool.Push(item);
+            }
         }
     }
 }

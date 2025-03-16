@@ -53,6 +53,12 @@ namespace THEBADDEST.Tasks
             }
         }
 
+        public bool TrySetCanceled(short token)
+        {
+            if (token != version) throw new InvalidOperationException("Invalid task token");
+            return TrySetCanceled();
+        }
+
         public bool TrySetResult(T result)
         {
             if (status.IsCompleted()) return false;

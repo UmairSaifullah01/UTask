@@ -6,7 +6,7 @@ using System.Security;
 namespace THEBADDEST.Tasks
 {
     [AsyncMethodBuilder(typeof(UTaskMethodBuilder<>))]
-    public readonly struct UTask<T>
+    public readonly partial struct UTask<T>
     {
         internal readonly IUTaskSource<T> source;
         private readonly short token;
@@ -17,8 +17,8 @@ namespace THEBADDEST.Tasks
             this.token = token;
         }
 
-        internal short Token => token;
-
+        internal short Token   => token;
+        public   bool  IsValid => source != null;
         public UTaskStatus Status
         {
             get

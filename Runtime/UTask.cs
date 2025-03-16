@@ -5,7 +5,7 @@ using UnityEngine;
 namespace THEBADDEST.Tasks
 {
     [AsyncMethodBuilder(typeof(UTaskMethodBuilder))]
-    public readonly struct UTask : IEquatable<UTask>
+    public readonly partial struct UTask : IEquatable<UTask>
     {
         internal readonly IUTaskSource source;
         private readonly short token;
@@ -26,8 +26,6 @@ namespace THEBADDEST.Tasks
 
         public bool IsCanceled => source?.GetStatus(token) == UTaskStatus.Canceled;
 
-        //public Exception Exception => source?.GetException();
-
         public UTaskStatus Status
         {
             get
@@ -37,6 +35,7 @@ namespace THEBADDEST.Tasks
             }
         }
 
+        // Instance methods
         public bool Equals(UTask other)
         {
             return source == other.source && token == other.token;
@@ -53,16 +52,6 @@ namespace THEBADDEST.Tasks
             {
                 return ((source != null ? source.GetHashCode() : 0) * 397) ^ token.GetHashCode();
             }
-        }
-
-        public static bool operator ==(UTask left, UTask right)
-        {
-            return left.Equals(right);
-        }
-
-        public static bool operator !=(UTask left, UTask right)
-        {
-            return !left.Equals(right);
         }
 
         internal void OnCompleted(Action continuation)
@@ -86,20 +75,14 @@ namespace THEBADDEST.Tasks
             return new UTaskAwaiter(this);
         }
 
-        public static UTask CompletedTask => new UTask();
-
-        public static UTask FromException(Exception exception)
+        public static bool operator ==(UTask left, UTask right)
         {
-            var source = new UTaskCompletionSource();
-            source.TrySetException(exception);
-            return source.Task;
+            return left.Equals(right);
         }
 
-        public static UTask FromCanceled()
+        public static bool operator !=(UTask left, UTask right)
         {
-            var source = new UTaskCompletionSource();
-            source.TrySetCanceled();
-            return source.Task;
+            return !left.Equals(right);
         }
     }
 
