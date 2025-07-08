@@ -367,5 +367,81 @@ namespace THEBADDEST.Tasks
 
 			return tcs.Task;
 		}
+
+		/// <summary>
+		/// Schedules the continuation of this UTask on a background thread using the thread pool.
+		/// </summary>
+		public static UTask MultiThreaded(this UTask task)
+		{
+			var tcs = new UTaskCompletionSource();
+			UTaskScheduler.Schedule(async () =>
+			{
+				try
+				{
+					await task;
+					UTaskThreadPoolScheduler.Schedule(() => tcs.TrySetResult());
+				}
+				catch (OperationCanceledException)
+				{
+					UTaskThreadPoolScheduler.Schedule(() => tcs.TrySetCanceled());
+				}
+				catch (Exception ex)
+				{
+					UTaskThreadPoolScheduler.Schedule(() => tcs.TrySetException(ex));
+				}
+			});
+			return tcs.Task;
+		}
+
+		/// <summary>
+		/// Schedules the continuation of this UTask<T> on a background thread using the thread pool.
+		/// </summary>
+		public static UTask<T> MultiThreaded<T>(this UTask<T> task)
+		{
+			var tcs = new UTaskCompletionSource<T>();
+			UTaskScheduler.Schedule(async () =>
+			{
+				try
+				{
+					var result = await task;
+					UTaskThreadPoolScheduler.Schedule(() => tcs.TrySetResult(result));
+				}
+				catch (OperationCanceledException)
+				{
+					UTaskThreadPoolScheduler.Schedule(() => tcs.TrySetCanceled());
+				}
+				catch (Exception ex)
+				{
+					UTaskThreadPoolScheduler.Schedule(() => tcs.TrySetException(ex));
+				}
+			});
+			return tcs.Task;
+		}
+
+		/// <summary>
+		/// Adds a continuation to a UTask, running the given action after the task completes.
+		/// </summary>
+		public static UTask ContinueWith(this UTask task, Action continuation)
+		{
+			var tcs = new UTaskCompletionSource();
+			UTaskScheduler.Schedule(async () =>
+			{
+				try
+				{
+					await task;
+					continuation?.Invoke();
+					tcs.TrySetResult();
+				}
+				catch (OperationCanceledException)
+				{
+					tcs.TrySetCanceled();
+				}
+				catch (Exception ex)
+				{
+					tcs.TrySetException(ex);
+				}
+			});
+			return tcs.Task;
+		}
 	}
 }

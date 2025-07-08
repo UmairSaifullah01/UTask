@@ -26,7 +26,9 @@ namespace THEBADDEST.Tasks.Examples
                 // await RunCustomYieldExample();
                 // await RunFixedUpdateExample();
                 // await RunCanceledExample();
-                await RunCancellationExample();
+                //await RunCancellationExample();
+                //await RunMultiThreadedExample(); // <--- Uncomment to test MultiThreaded extension
+                 await RunParallelLoopExample(); // <--- Uncomment to test parallel loop with MultiThreaded
             }
             catch (Exception ex)
             {
@@ -375,5 +377,48 @@ namespace THEBADDEST.Tasks.Examples
 
             Debug.Log("Long running task completed!");
         }
+
+        /// <summary>
+        /// Demonstrates running UTask continuations on a background thread using .MultiThreaded().
+        /// </summary>
+        private async UTask RunMultiThreadedExample()
+        {
+            Debug.Log($"[MainThread] Before await: Thread={System.Threading.Thread.CurrentThread.ManagedThreadId}, IsMainThread={UnityEngine.Application.isPlaying}");
+
+            // Run a simple UTask and switch its continuation to a background thread
+            await UTask.Delay(1f).MultiThreaded();
+            Debug.Log($"[MultiThreaded] After await: Thread={System.Threading.Thread.CurrentThread.ManagedThreadId}, IsMainThread={UnityEngine.Application.isPlaying}");
+
+            // Run a UTask<T> and switch its continuation to a background thread
+            int result = await CalculateWithDelay().MultiThreaded();
+            Debug.Log($"[MultiThreaded] Got result: {result} on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId}");
+
+            // Show that you can chain back to main thread if needed (not implemented here, but possible with a .MainThreaded() extension)
+            Debug.Log("MultiThreaded example completed!");
+        }
+
+        /// <summary>
+        /// Demonstrates running a parallel loop using UTask and .MultiThreaded().
+        /// </summary>
+        private async UTask RunParallelLoopExample()
+        {
+            int numTasks = 5;
+            UTask[] tasks = new UTask[numTasks];
+
+            Debug.Log($"[MainThread] Starting parallel loop with {numTasks} tasks...");
+
+            for (int i = 0; i < numTasks; i++)
+            {
+                int taskIndex = i; // Capture loop variable
+                tasks[i] = UTask.Delay(UnityEngine.Random.Range(0.5f, 2f)).MultiThreaded().ContinueWith(() =>
+                {
+                    Debug.Log($"[MultiThreaded] Task {taskIndex} completed on Thread={System.Threading.Thread.CurrentThread.ManagedThreadId}");
+                });
+            }
+
+            await UTask.All(tasks);
+            Debug.Log("[MainThread] All parallel loop tasks completed!");
+        }
+        
     }
 }
