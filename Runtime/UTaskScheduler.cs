@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace THEBADDEST.Tasks
 {
@@ -36,6 +39,14 @@ namespace THEBADDEST.Tasks
 
             try
             {
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                {
+                    EditorApplication.update += EditorUpdate;
+                    isInitialized = true;
+                    return;
+                }
+#endif
                 var go = new GameObject("UTaskScheduler") { hideFlags = HideFlags.HideInHierarchy };
                 var scheduler = go.AddComponent<UTaskScheduler>();
                 DontDestroyOnLoad(go);
@@ -205,9 +216,31 @@ namespace THEBADDEST.Tasks
             }
         }
 
+#if UNITY_EDITOR
+        private static void EditorUpdate()
+        {
+            if (Application.isPlaying || !isInitialized || isProcessing || isQuitting) return;
+            isProcessing = true;
+            try
+            {
+                ProcessMainThreadActionsStatic();
+                ProcessPerFrameActionsStatic();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error in UTaskScheduler EditorUpdate: {e}");
+            }
+            finally
+            {
+                isProcessing = false;
+            }
+        }
+#endif
+
         private void Update()
         {
             if (!isInitialized || isProcessing || isQuitting) return;
+            if (!Application.isPlaying) return; // Only run in play mode
             isProcessing = true;
 
             try
@@ -382,5 +415,81 @@ namespace THEBADDEST.Tasks
                 }
             }
         }
+
+#if UNITY_EDITOR
+        private static void ProcessMainThreadActionsStatic()
+        {
+            int processedCount = 0;
+            int currentTail;
+            lock (lockObject)
+            {
+                currentTail = tail;
+            }
+            while (head != currentTail && processedCount < RING_BUFFER_SIZE)
+            {
+                var action = actionRingBuffer[head];
+                if (action != null)
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogException(e);
+                    }
+                }
+                head = (head + 1) % RING_BUFFER_SIZE;
+                processedCount++;
+                totalProcessedActions++;
+            }
+        }
+
+        private static void ProcessPerFrameActionsStatic()
+        {
+            lock (lockObject)
+            {
+                tempActionsList.Clear();
+                foreach (var action in perFrameActions)
+                {
+                    tempActionsList.Add(action);
+                }
+            }
+            var actionsToRemove = new List<Action>();
+            foreach (var action in tempActionsList)
+            {
+                try
+                {
+                    if (action == null)
+                    {
+                        actionsToRemove.Add(action);
+                        continue;
+                    }
+                    if (action.Target is UnityEngine.Object target && target == null)
+                    {
+                        actionsToRemove.Add(action);
+                        continue;
+                    }
+                    action();
+                    totalProcessedPerFrameActions++;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                    actionsToRemove.Add(action);
+                }
+            }
+            if (actionsToRemove.Count > 0)
+            {
+                lock (lockObject)
+                {
+                    foreach (var action in actionsToRemove)
+                    {
+                        perFrameActions.Remove(action);
+                    }
+                }
+            }
+        }
+#endif
     }
 }
