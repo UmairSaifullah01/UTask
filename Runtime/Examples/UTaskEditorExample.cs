@@ -6,7 +6,7 @@ using THEBADDEST.Tasks;
 
 namespace THEBADDEST.Tasks.Examples
 {
-    [InitializeOnLoad]
+    //[InitializeOnLoad]
     public static class UTaskEditorExample
     {
         static UTaskEditorExample()

@@ -270,7 +270,7 @@ namespace THEBADDEST.Tasks
         }
     }
 
-    public readonly partial struct UTask<T>
+    public readonly partial struct UTask<T> 
     {
         public static UTask<T> Break()
         {
@@ -278,6 +278,7 @@ namespace THEBADDEST.Tasks
             source.TrySetCanceled();
             return source.Task;
         }
+        
     }
 
     internal class MinHeap<T> where T : IComparable<T>

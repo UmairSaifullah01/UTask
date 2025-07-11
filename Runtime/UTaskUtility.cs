@@ -443,5 +443,18 @@ namespace THEBADDEST.Tasks
 			});
 			return tcs.Task;
 		}
+		
+		public static UTask ToTask<T>(this UTask<T> task)
+		{
+			var tcs = new UTaskCompletionSource();
+			task.OnCompleted(() =>
+			{
+				if (task.Status == UTaskStatus.Succeeded)
+				{
+					tcs.TrySetResult();
+				}
+			});
+			return tcs.Task;
+		}
 	}
 }
